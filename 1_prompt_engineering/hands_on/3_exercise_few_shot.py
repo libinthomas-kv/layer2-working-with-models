@@ -29,3 +29,4 @@ def exercise_3_classify_ticket(ticket_text: str) -> str:
 if __name__ == "__main__":
     print(exercise_3_classify_ticket("Export to PDF is broken in Safari."))
     print(exercise_3_classify_ticket("How do I change my password?"))
+    print(exercise_3_classify_ticket("Dark mode is not working."))

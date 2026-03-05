@@ -17,12 +17,6 @@ def exercise_1_answer_question(question: str) -> str:
     # TODO 1.2: Build user message
     user = ""  # <-- fill in (use PRODUCT_CONTEXT and question)
 
-    instruction = (
-        "You are a product support assistant. "
-        "You answer product questions using only the provided context. "
-        "If the answer is not in the context, reply exactly: Not in context. One short answer."
-    )
-    user = f"## Context\n{PRODUCT_CONTEXT.strip()}\n\n## Query\n{question}"
     if not instruction or not user:
         raise ValueError("Complete the TODO's")
     else:
