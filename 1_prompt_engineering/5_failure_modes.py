@@ -1,7 +1,7 @@
 """
 Session 5: Common failure modes.
 
-- Hallucination: model invents facts. Mitigate: constrain to context, ask for citations, use retrieval.
+- Hallucination: we provide context but the model responds with data not in the context. Mitigate: constrain to context, ask for citations, use retrieval.
 - Prompt injection: user input tries to override instructions. Mitigate: clear instruction/context/query split, sanitise, don't trust user-supplied "instructions".
 - Ambiguity: vague prompt → inconsistent output. Mitigate: explicit format, examples, constraints.
 """
@@ -11,15 +11,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from client import complete
 
 
-# --- Hallucination: no context, model may invent ---
-def vulnerable_to_hallucination(question: str) -> str:
-    return complete("Answer factually.", question)
+# --- Hallucination: we provide context, but model may respond with data NOT in the context ---
+def vulnerable_to_hallucination(question: str, context: str) -> str:
+    return complete(
+        "Answer the question based on the context below.",
+        f"Context:\n{context}\n\nQuestion: {question}",
+    )
 
 
 # --- Safer: only use provided context (role + rules) ---
 def grounded_answer(question: str, context: str) -> str:
     return complete(
-        "You are a factual Q&A assistant. Answer using ONLY the context below. If the answer is not in the context, say 'Unknown'. Do not invent facts.",
+        "You are a factual Q&A assistant. Answer using ONLY the context below. For any part of the question not covered by the context, say so in a clear sentence. Do not invent facts.",
         f"Context:\n{context}\n\nQuestion: {question}",
     )
 
@@ -60,17 +63,18 @@ def run_demo():
     print("  Failure modes — and how to mitigate them")
     print(sep)
 
-    print("\n  --- 1. Hallucination (model invents) vs grounded (use only context) ---")
+    print("\n  --- 1. Hallucination (model responds with data NOT in context) vs grounded ---")
     ctx = "The company refund policy: full refund within 30 days. No refunds after 30 days."
-    q = "What is the refund window?"
-    print("  Question (same for both):", q)
+    q = "What is the refund window and what documents do I need to bring?"
+    print("  Context (same for both):", ctx)
+    print("  Question:", q, "(context does NOT mention required documents)")
     print()
-    print("  Without context (may hallucinate): system = 'Answer factually.', no context given.")
-    out_bad = vulnerable_to_hallucination(q)
+    print("  Vulnerable: we give context but do not require the model to stick to it.")
+    print("  (Model may invent 'receipt', 'packaging', etc. — that is hallucination.)")
+    out_bad = vulnerable_to_hallucination(q, ctx)
     print("  Output:", out_bad)
     print()
-    print("  With context (grounded): answer ONLY from the context below.")
-    print("  Context:", ctx)
+    print("  Grounded: answer ONLY from context; for missing parts use a sentence (e.g. 'I don't have that in the context.').")
     out_good = grounded_answer(q, ctx)
     print("  Output:", out_good)
     print()
