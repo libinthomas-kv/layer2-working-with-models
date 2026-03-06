@@ -29,6 +29,7 @@ def run_demo():
     print("  Use complete_vision(system, user_text, image_url)")
     print("  image_url can be: https://... or data:image/jpeg;base64,...")
     print("  Example: describe_image('https://example.com/photo.jpg', 'What is in this image?')")
+    print()
     print(describe_image("https://miro.medium.com/v2/resize:fit:700/1*bPaSl_g6mNjq_-RUZkK8gg.png", "What is in this image?"))
 
 
