@@ -1,0 +1,12 @@
+-------------------------------------------------2----------------------------------------------------------
+
+# Multimodal hands-on — solution notes
+
+## 1. Vision (1_exercise_vision.py)
+- 1.1: VISION_SYSTEM = "You are an image analyst. Answer only from what you see in the image. Be concise."
+
+## 2. Audio (2_exercise_audio.py)
+- 2.1: system = "You are a meeting notes assistant. Summarize the transcript in 2–3 sentences.";
+
+## 3. Document (3_exercise_document.py) — text + PDF
+- 3.1: DOC_SYSTEM = "You are a document extraction assistant. Use only the provided context. Output as requested (list or one line)."

@@ -8,13 +8,9 @@ try:
 except ImportError:
     pass
 
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
+from openai import OpenAI
 
-
-def get_client() -> "OpenAI | None":
+def get_client() -> OpenAI:
     if OpenAI is None:
         return None
     key = os.getenv("OPENAI_API_KEY")
