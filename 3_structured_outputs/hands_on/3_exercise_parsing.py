@@ -1,83 +1,105 @@
 """
-Hands-on 3 (Structured Outputs): Parsing and validating.
+Hands-on 3 (Structured Outputs): Parsing and validating with Pydantic.
 
-Same approach as the demo: define the schema once, then (1) pass it to the LLM via response_format,
-(2) use it in validation. Parse with json.loads, then validate required keys and types.
+Goal:
+1. Extract restaurant reservation details from a request
+2. Parse JSON output from the model
+3. Validate using a Pydantic model
 
-Run from repo root:  python 3_structured_outputs/hands_on/3_exercise_parsing.py
+Run:
+python 3_structured_outputs/hands_on/3_exercise_parsing.py
 """
+
 import json
 import sys
+from datetime import date
 from pathlib import Path
+
+from pydantic import BaseModel, ValidationError, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from client import chat
 
-# Schema: single source of truth (same shape for API and validation). Confidence in [0, 1].
-CONFIDENCE_MIN, CONFIDENCE_MAX = 0, 1
-ANSWER_SCHEMA = {
-    "answer": str,
-    "confidence": (int, float),
-}
 
-# Same shape as ANSWER_SCHEMA, in the format the API expects for response_format.
+# TODO: Students must complete the Pydantic model
+# should contain restaurant_name, party_size, reservation_date
+# field validators
+    # restaurant_name should not be empty
+    # party_size should be greater than 0
+    # reservation_date should be today or in the future
+class Reservation(BaseModel):
+   pass # fill in the implementation here
+
+
 RESPONSE_FORMAT_SCHEMA = {
     "type": "json_schema",
     "json_schema": {
-        "name": "qa_answer",
+        "name": "restaurant_reservation",
         "strict": True,
         "schema": {
             "type": "object",
             "properties": {
-                "answer": {"type": "string"},
-                "confidence": {"type": "number", "description": f"Confidence score from {CONFIDENCE_MIN} to {CONFIDENCE_MAX}"},
+                "restaurant_name": {"type": "string"},
+                "party_size": {"type": "integer"},
+                "reservation_date": {
+                    "type": "string",
+                    "format": "date"
+                },
             },
-            "required": ["answer", "confidence"],
+            "required": ["restaurant_name", "party_size", "reservation_date"],
             "additionalProperties": False,
         },
     },
 }
 
-SYSTEM = "You are a helpful QA assistant. Answer the question and give a confidence score from 0 to 1."
+SYSTEM = """You are a restaurant reservation assistant. Extract restaurant reservation details from user requests. 
+    Do not make up any information other than the information provided in the request."""
 
-
-def parse_safe(raw: str) -> dict | None:
-    """Parse JSON; return None on error."""
+def parse_safe(raw: str):
+    """Parse JSON safely."""
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return None
 
+def ask_with_validation(text: str):
+    """LLM → JSON → Pydantic validation"""
 
-def validate_response(data: dict) -> tuple[bool, list[str]]:
-    """Validate parsed data against ANSWER_SCHEMA; confidence must be in [CONFIDENCE_MIN, CONFIDENCE_MAX]."""
-    errors = []
-    pass # fill in the implementation here
-
-
-def exercise_3_ask_with_validation(question: str) -> tuple[dict | None, str, list[str]]:
-    """Ask the model (schema passed via response_format), parse, validate. Return (data, raw, errors)."""
-    if not RESPONSE_FORMAT_SCHEMA:
-        return None, "", ["You must fill in RESPONSE_FORMAT_SCHEMA"]
     messages = [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": question},
+        {"role": "user", "content": text},
     ]
+
     raw = chat(messages, response_format=RESPONSE_FORMAT_SCHEMA)
+
     data = parse_safe(raw)
+
     if data is None:
-        return None, raw, ["JSON parse failed"]
-    ok, errs = validate_response(data)
-    if not ok:
-        return None, raw, errs
-    return data, raw, []
+        return None, raw, ["JSON parsing failed"]
+
+    try:
+        reservation = Reservation.model_validate(data)
+        return reservation, raw, []
+
+    except ValidationError as e:
+        errors = []
+        for err in e.errors():
+            loc = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{loc}: {err['msg']}")
+        return None, raw, errors
 
 
 if __name__ == "__main__":
-    result, raw, errors = exercise_3_ask_with_validation("What is the capital of France?")
+
+    request = "Reserve a table for 4 people for lunch on 2026-04-10"
+    # request = "Reserve a table for 4 people for lunch on 2026-04-10 at Olive Garden"
+    # request = "Reserve a table for 4 people for lunch at Olive Garden"
+
+    result, raw, errors = ask_with_validation(request)
+
     if result:
-        print("Result:", result)
+        print("Reservation:", result)
     else:
-        print("Invalid or unparseable:")
-        print("  Raw:", raw[:300] + ("..." if len(raw) > 300 else ""))
-        print("  Errors:", errors)
+        print("Invalid output")
+        print("Raw:", raw)
+        print("Errors:", errors)

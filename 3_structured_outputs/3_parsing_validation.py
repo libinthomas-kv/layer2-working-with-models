@@ -1,122 +1,161 @@
 """
 Session 3 (Structured Outputs): Parsing and validating model outputs in production.
 
-1. Schema: we pass the response schema to the LLM via response_format (so the model must conform).
-2. Parse: API returns a string; parse with json.loads (parse_json_safe).
-3. Validate: still validate in code (required keys, types) for robustness and fallbacks.
+Demo Goal:
+1. First request contains all fields -> validation SUCCESS
+2. Second request missing journey_date -> validation FAILURE
 
-Run from repo root:  python 3_structured_outputs/3_parsing_validation.py
+Run:
+python 3_structured_outputs/3_parsing_validation.py
 """
+
 import json
 import sys
+from datetime import date
 from pathlib import Path
+
+from pydantic import BaseModel, ValidationError, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from client import chat
 
-SCORE_MIN, SCORE_MAX = 0, 100
 
-# Schema we pass to the LLM (response_format). Model output must match this.
+class TrainBooking(BaseModel):
+    from_station: str
+    to_station: str
+    journey_date: date
+
+    @field_validator("from_station", "to_station")
+    def non_empty_station(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("journey_date")
+    def not_in_past(cls, v: date) -> date:
+        if v < date.today():
+            raise ValueError("journey_date must be today or in the future")
+        return v
+
+
+# JSON Schema sent to LLM
+# journey_date is intentionally NOT required
 RESPONSE_FORMAT_SCHEMA = {
     "type": "json_schema",
     "json_schema": {
-        "name": "extraction",
+        "name": "train_booking",
         "strict": True,
         "schema": {
             "type": "object",
             "properties": {
-                "summary": {"type": "string"},
-                "entities": {"type": "array", "items": {"type": "string"}},
-                "score": {"type": "number", "description": f"Relevance score from {SCORE_MIN} to {SCORE_MAX}"},
+                "from_station": {
+                    "type": "string",
+                    "description": "Departure station name."
+                },
+                "to_station": {
+                    "type": "string",
+                    "description": "Arrival station name."
+                },
+                "journey_date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Journey date in YYYY-MM-DD format."
+                },
             },
-            "required": ["summary", "entities", "score"],
+            "required": ["from_station", "to_station", "journey_date"],
             "additionalProperties": False,
         },
     },
 }
 
-# Same shape for validation in code (we check types and score range).
-EXTRACTION_SCHEMA = {
-    "summary": str,
-    "entities": list,
-    "score": (int, float),
-}
-
 SYSTEM = (
-    "You are a structured data assistant. "
-    f"Summarize in one sentence, list main entities (names/orgs), and give a relevance score from {SCORE_MIN} to {SCORE_MAX}."
+    "You are a train booking extraction assistant. "
+    "Extract booking details from the user's request."
 )
 
 
-def parse_json_safe(raw: str) -> dict | None:
-    """Parse JSON; return None on failure."""
+def parse_json_safe(raw: str):
+    """Parse JSON safely."""
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return None
 
 
-def validate_extraction(data: dict) -> tuple[bool, list[str]]:
-    """Validate parsed JSON against EXTRACTION_SCHEMA. Return (ok, list of errors)."""
-    errors = []
+def validate_booking(data: dict):
+    """Validate parsed JSON with Pydantic."""
     if not isinstance(data, dict):
-        return False, ["Expected a JSON object"]
-    if "summary" not in data or not isinstance(data.get("summary"), EXTRACTION_SCHEMA["summary"]):
-        errors.append("Missing or invalid 'summary' (string)")
-    if "entities" not in data or not isinstance(data.get("entities"), EXTRACTION_SCHEMA["entities"]):
-        errors.append("Missing or invalid 'entities' (list)")
-    if "score" not in data:
-        errors.append("Missing 'score'")
-    else:
-        s = data["score"]
-        if not isinstance(s, EXTRACTION_SCHEMA["score"]) or not (SCORE_MIN <= s <= SCORE_MAX):
-            errors.append(f"'score' must be a number between {SCORE_MIN} and {SCORE_MAX}")
-    return len(errors) == 0, errors
+        return None, ["Expected a JSON object"]
+
+    try:
+        booking = TrainBooking.model_validate(data)
+        return booking, []
+
+    except ValidationError as e:
+        errors = []
+        for err in e.errors():
+            loc = ".".join(str(x) for x in err.get("loc", []))
+            msg = err.get("msg", "Invalid value")
+            errors.append(f"{loc}: {msg}")
+        return None, errors
 
 
-def extract_with_validation(text: str, max_tokens: int | None = None) -> tuple[dict | None, str, list[str]]:
-    """
-    Get JSON from model (schema always passed), parse, validate.
-    Optional max_tokens: if set very low, response can be truncated → invalid JSON (for demo failure case).
-    Returns (data, raw_response, validation_errors).
-    """
+def book_train_with_validation(text: str):
+    """LLM → JSON → Validation pipeline."""
+
     messages = [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": f"Summarize in one sentence, list main entities (names/orgs), and give a relevance score 0-100.\n\nText:\n{text}"},
+        {
+            "role": "user",
+            "content": (
+                "Extract train booking details and return structured JSON."
+                f"Request:\n{text}"
+            ),
+        },
     ]
-    kwargs = dict(messages=messages, response_format=RESPONSE_FORMAT_SCHEMA)
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
-    raw = chat(**kwargs)
+
+    raw = chat(messages=messages, response_format=RESPONSE_FORMAT_SCHEMA)
+
     data = parse_json_safe(raw)
+
     if data is None:
-        return None, raw, ["JSON parse failed"]
-    ok, errs = validate_extraction(data)
-    if not ok:
-        return None, raw, errs
-    return data, raw, []
+        return None, raw, ["JSON parsing failed"]
+
+    booking, errors = validate_booking(data)
+
+    if booking is None:
+        return None, raw, errors
+
+    return booking, raw, []
 
 
 def run_demo():
-    sample = "Apple Inc. and Microsoft Corp announced a partnership on AI in 2024."
 
-    print("--- Success case (schema passed to LLM, enough tokens) ---")
-    result, raw, errors = extract_with_validation(sample)
-    if result:
-        print("Valid result:", result)
-    else:
-        print("Invalid or unparseable result:")
-        print("  Raw response:", raw[:500] + ("..." if len(raw) > 500 else ""))
-        print("  Errors:", errors)
+    complete_request = "Book a train from London to Edinburgh on 2026-03-20."
+    missing_date_request = "Book a train from Kochi to Kottayam"
 
-    print("\n--- Failure case (schema still passed, but max_tokens very low → response truncated → invalid JSON) ---")
-    result, raw, errors = extract_with_validation(sample, max_tokens=25)
+    print(f"\n--- SUCCESS CASE --- {complete_request} ---")
+    result, raw, errors = book_train_with_validation(complete_request)
+
     if result:
-        print("Valid result:", result)
+        print("Valid booking:", result)
     else:
-        print("Invalid or unparseable result:")
-        print("  Raw response:", raw[:500] + ("..." if len(raw) > 500 else ""))
-        print("  Errors:", errors)
+        print("Validation failed")
+        print("Raw response:", raw)
+        print("Errors:", errors)
+
+    print(f"\n--- FAILURE CASE (Missing journey_date) --- {missing_date_request} ---")
+    result, raw, errors = book_train_with_validation(missing_date_request)
+
+    if result:
+        print("Valid booking:", result)
+    else:
+        print("Validation failed")
+        print("Raw response:", raw)
+        print("Errors:")
+        for e in errors:
+            print(" -", e)
 
 
 if __name__ == "__main__":
