@@ -1,0 +1,93 @@
+-------------------------------------------------3---------------------------------------------------------
+3.1
+class Event(BaseModel):
+    name: str
+    day: str
+    time: str
+    attendees: int
+
+
+class EventList(BaseModel):
+    events: list[Event]
+
+ response = client.responses.parse(
+        model="gpt-4o-mini",
+        input=[
+            {
+                "role": "system",
+                "content": "Extract meeting/event data from the paragraph. Each event has name, day, time, and attendees (integer).",
+            },
+            {"role": "user", "content": "Paragraph:\n" + text},
+        ],
+        text_format=EventList,
+    )
+    return response.output_parsed
+
+---------
+3.2
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_term",
+            "description": "Look up a term and return a short definition.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string", "description": "The term to look up"},
+                },
+                "required": ["term"],
+            },
+        },
+    },
+]
+
+
+def lookup_term_impl(term: str) -> str:
+    """Look up a term using Free Dictionary API (no API key). Returns first definition or an error string."""
+    try:
+        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{quote(term.strip())}"
+        with urlopen(Request(url, headers={"User-Agent": "Layer2Demo/1.0"})) as r:
+            data = json.loads(r.read().decode())
+        if not data or not isinstance(data, list):
+            return f'No definition found for "{term}"'
+        # First entry, first meaning, first definition
+        entry = data[0]
+        meanings = entry.get("meanings") or []
+        if not meanings:
+            return f'No definition found for "{term}"'
+        definitions = meanings[0].get("definitions") or []
+        if not definitions:
+            return f'No definition found for "{term}"'
+        return definitions[0].get("definition", "(no definition text)")
+    except Exception as e:
+        return f'Lookup error for "{term}": {e}'
+
+------------
+
+3.3
+    restaurant_name: str
+    party_size: int
+    reservation_date: date
+
+    # TODO: ensure restaurant name is not empty
+    @field_validator("restaurant_name")
+    def non_empty_name(cls, v: str):
+        v = v.strip()
+        if not v:
+            raise ValueError("restaurant_name must not be empty")
+        return v
+
+    # TODO: ensure party size > 0
+    @field_validator("party_size")
+    def valid_party_size(cls, v: int):
+        if v <= 0:
+            raise ValueError("party_size must be greater than 0")
+        return v
+
+    # TODO: reservation date cannot be in the past
+    @field_validator("reservation_date")
+    def not_in_past(cls, v: date):
+        if v < date.today():
+            raise ValueError("reservation_date must be today or in the future")
+        return v
